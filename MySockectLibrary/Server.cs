@@ -89,7 +89,7 @@ namespace MySockectLibrary
                         string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
                         Console.WriteLine($"Mensaje recibido: {message}");
 
-                        string response = $"ECHO: {message}";
+                        string response = $"{message}";
                         byte[] responseBytes = Encoding.UTF8.GetBytes(response);
                         await stream.WriteAsync(responseBytes, 0, responseBytes.Length);
                     }
