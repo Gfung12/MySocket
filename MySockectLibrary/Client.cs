@@ -1,4 +1,5 @@
-﻿using System.Net.Sockets;
+﻿using System.Net;
+using System.Net.Sockets;
 using System.Text;
 
 /// <summary>
@@ -6,55 +7,99 @@ using System.Text;
 /// </summary>
 public class SocketClient
 {
-    // Cliente TCP utilizado para la conexión.
     private TcpClient _client = null!;
-
-    // Flujo de red utilizado para enviar y recibir datos.
     private NetworkStream _stream = null!;
+    private readonly int _maxRetries;
+    private readonly int _retryDelayMs;
 
-    /// <summary>
-    /// Conecta el cliente al servidor especificado por la dirección IP y el puerto.
-    /// </summary>
-    /// <param name="ip">Dirección IP del servidor.</param>
-    /// <param name="port">Puerto del servidor.</param>
-    /// <returns>Una tarea que representa la operación asincrónica de conexión.</returns>
+    public SocketClient(int maxRetries = 3, int retryDelayMs = 1000)
+    {
+        _maxRetries = maxRetries;
+        _retryDelayMs = retryDelayMs;
+    }
+
     public async Task ConnectAsync(string ip, int port)
     {
-        _client = new TcpClient();
-        await _client.ConnectAsync(ip, port);
-        _stream = _client.GetStream();
-        Console.WriteLine($"Conectado a {ip}:{port}");
+        int retryCount = 0;
+        while (retryCount < _maxRetries)
+        {
+            try
+            {
+                _client = new TcpClient();
+                await _client.ConnectAsync(ip, port);
+                _stream = _client.GetStream();
+                Console.WriteLine($"Conectado a {ip}:{port}");
+                return;
+            }
+            catch (Exception ex) when (ex is SocketException || ex is IOException)
+            {
+                retryCount++;
+                Console.WriteLine($"Intento {retryCount} de conexión fallido: {ex.Message}");
+
+                if (retryCount >= _maxRetries)
+                    throw new Exception($"No se pudo conectar después de {_maxRetries} intentos", ex);
+
+                await Task.Delay(_retryDelayMs);
+            }
+        }
     }
 
-    /// <summary>
-    /// Envía un mensaje al servidor y espera una respuesta.
-    /// </summary>
-    /// <param name="message">Mensaje a enviar.</param>
-    /// <returns>Una tarea que representa la operación asincrónica de envío.</returns>
     public async Task SendAsync(string message)
     {
-        // Convertir el mensaje a un arreglo de bytes.
+        int retryCount = 0;
         byte[] data = Encoding.UTF8.GetBytes(message);
 
-        // Enviar el mensaje al servidor.
-        await _stream.WriteAsync(data, 0, data.Length);
-        Console.WriteLine($"Mensaje enviado: {message}");
+        while (retryCount < _maxRetries)
+        {
+            try
+            {
+                
+                await _stream.WriteAsync(data, 0, data.Length);
+                Console.WriteLine($"Mensaje enviado: {message}");
 
-        // Buffer para almacenar la respuesta del servidor.
-        byte[] buffer = new byte[1024];
+                byte[] buffer = new byte[1024];
+                int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
+                string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                Console.WriteLine($"Respuesta del servidor: {response}");
+                return;
+            }
+            catch (Exception ex) when (ex is SocketException || ex is IOException)
+            {
+                retryCount++;
+                Console.WriteLine($"Intento {retryCount} de envío fallido: {ex.Message}");
 
-        // Leer la respuesta del servidor.
-        int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
-        string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-        Console.WriteLine($"Respuesta del servidor: {response}");
+                if (retryCount >= _maxRetries)
+                    throw new Exception($"No se pudo enviar el mensaje después de {_maxRetries} intentos", ex);
+
+                await Task.Delay(_retryDelayMs);
+
+                // Intentar reconectar antes del próximo reintento
+                await TryReconnectAsync();
+            }
+        }
     }
 
-    /// <summary>
-    /// Desconecta el cliente del servidor.
-    /// </summary>
+    private async Task TryReconnectAsync()
+    {
+        try
+        {
+            if (_client?.Connected == false)
+            {
+                Console.WriteLine("Intentando reconectar...");
+                await ConnectAsync(((IPEndPoint)_client.Client.RemoteEndPoint).Address.ToString(),
+                                 ((IPEndPoint)_client.Client.RemoteEndPoint).Port);
+            }
+        }
+        catch
+        {
+            // Silenciar errores de reconexión, ya que el reintento principal manejará esto
+        }
+    }
+
     public void Disconnect()
     {
         _stream?.Close();
         _client?.Close();
     }
 }
+

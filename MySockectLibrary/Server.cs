@@ -7,30 +7,21 @@ using System.Net.Sockets;
 
 namespace MySockectLibrary
 {
-    /// <summary>
-    /// Clase que representa un servidor de socket TCP.
-    /// </summary>
+    
     public class SocketServer
     {
-        // Listener TCP utilizado para aceptar conexiones de clientes.
         private TcpListener _listener;
-
-        // Indica si el servidor está en ejecución.
         private bool _isRunning;
+        private readonly int _maxRetries;
+        private readonly int _retryDelayMs;
 
-        /// <summary>
-        /// Inicializa una nueva instancia de la clase <see cref="SocketServer"/> con el puerto especificado.
-        /// </summary>
-        /// <param name="port">Puerto en el que el servidor escuchará las conexiones entrantes.</param>
-        public SocketServer(int port)
+        public SocketServer(int port, int maxRetries = 3, int retryDelayMs = 1000)
         {
             _listener = new TcpListener(IPAddress.Any, port);
+            _maxRetries = maxRetries;
+            _retryDelayMs = retryDelayMs;
         }
 
-        /// <summary>
-        /// Inicia el servidor y comienza a aceptar conexiones de clientes.
-        /// </summary>
-        /// <returns>Una tarea que representa la operación asincrónica de inicio del servidor.</returns>
         public async Task StartAsync()
         {
             _isRunning = true;
@@ -39,16 +30,48 @@ namespace MySockectLibrary
 
             while (_isRunning)
             {
-                var client = await _listener.AcceptTcpClientAsync();
-                _ = HandleClientAsync(client); // Manejar cliente en segundo plano
+                try
+                {
+                    var client = await _listener.AcceptTcpClientAsync();
+                    _ = HandleClientWithRetryAsync(client);
+                }
+                catch (Exception ex) when (ex is SocketException || ex is ObjectDisposedException)
+                {
+                    if (!_isRunning) return; // Detención normal del servidor
+
+                    Console.WriteLine($"Error aceptando conexión: {ex.Message}");
+                    await Task.Delay(_retryDelayMs);
+                }
             }
         }
 
-        /// <summary>
-        /// Maneja la comunicación con un cliente conectado.
-        /// </summary>
-        /// <param name="client">Cliente TCP conectado.</param>
-        /// <returns>Una tarea que representa la operación asincrónica de manejo del cliente.</returns>
+        private async Task HandleClientWithRetryAsync(TcpClient client)
+        {
+            int retryCount = 0;
+
+            while (retryCount < _maxRetries)
+            {
+                try
+                {
+                    await HandleClientAsync(client);
+                    return;
+                }
+                catch (Exception ex) when (ex is SocketException || ex is IOException)
+                {
+                    retryCount++;
+                    Console.WriteLine($"Intento {retryCount} de manejo de cliente fallido: {ex.Message}");
+
+                    if (retryCount >= _maxRetries)
+                    {
+                        Console.WriteLine($"No se pudo manejar el cliente después de {_maxRetries} intentos");
+                        return;
+                    }
+
+                    await Task.Delay(_retryDelayMs);
+                }
+            }
+        }
+
         private async Task HandleClientAsync(TcpClient client)
         {
             using (client)
@@ -59,16 +82,12 @@ namespace MySockectLibrary
                 string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
                 Console.WriteLine($"Mensaje recibido: {message}");
 
-                // Respuesta automática
                 string response = "Mensaje recibido por el servidor";
                 byte[] responseBytes = Encoding.UTF8.GetBytes(response);
                 await stream.WriteAsync(responseBytes, 0, responseBytes.Length);
             }
         }
 
-        /// <summary>
-        /// Detiene el servidor y deja de aceptar conexiones de clientes.
-        /// </summary>
         public void Stop()
         {
             _isRunning = false;
