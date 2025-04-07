@@ -74,17 +74,30 @@ namespace MySockectLibrary
 
         private async Task HandleClientAsync(TcpClient client)
         {
-            using (client)
-            using (var stream = client.GetStream())
+            try
             {
-                byte[] buffer = new byte[1024];
-                int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                Console.WriteLine($"Mensaje recibido: {message}");
+                using (var stream = client.GetStream())
+                {
+                    while (true) // Mantener la conexión abierta para múltiples mensajes
+                    {
+                        byte[] buffer = new byte[1024];
+                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
 
-                string response = "Mensaje recibido por el servidor";
-                byte[] responseBytes = Encoding.UTF8.GetBytes(response);
-                await stream.WriteAsync(responseBytes, 0, responseBytes.Length);
+                        if (bytesRead == 0) // Cliente cerró la conexión
+                            break;
+
+                        string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                        Console.WriteLine($"Mensaje recibido: {message}");
+
+                        string response = $"ECHO: {message}";
+                        byte[] responseBytes = Encoding.UTF8.GetBytes(response);
+                        await stream.WriteAsync(responseBytes, 0, responseBytes.Length);
+                    }
+                }
+            }
+            finally
+            {
+                client.Dispose();
             }
         }
 

@@ -5,28 +5,43 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        var client = new SocketClient();
+        var client = new SocketClient(maxRetries: 3, retryDelayMs: 1000);
 
         try
         {
-            Console.WriteLine("Conectando al servidor...");
             await client.ConnectAsync("127.0.0.1", 8080);
 
             while (true)
             {
-                Console.Write("Escribe un mensaje (o 'salir' para terminar): ");
+                Console.Write("Ingrese mensaje (o 'salir' para terminar): ");
                 var message = Console.ReadLine();
 
                 if (message?.ToLower() == "salir")
                     break;
 
-                await client.SendAsync(message!);
+                try
+                {
+                    await client.SendAsync(message);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error grave: {ex.Message}");
+                    Console.WriteLine("¿Reconectar? (s/n)");
+                    if (Console.ReadLine()?.ToLower() == "s")
+                    {
+                        await client.ConnectAsync("127.0.0.1", 8080);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
             }
         }
         finally
         {
             client.Disconnect();
-            Console.WriteLine("Desconectado");
+            Console.WriteLine("Desconectado del servidor.");
         }
     }
 }

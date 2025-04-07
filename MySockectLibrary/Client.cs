@@ -46,6 +46,11 @@ public class SocketClient
 
     public async Task SendAsync(string message)
     {
+        if (_client == null || !_client.Connected)
+        {
+            throw new InvalidOperationException("El cliente no está conectado");
+        }
+
         int retryCount = 0;
         byte[] data = Encoding.UTF8.GetBytes(message);
 
@@ -53,12 +58,15 @@ public class SocketClient
         {
             try
             {
-                
                 await _stream.WriteAsync(data, 0, data.Length);
                 Console.WriteLine($"Mensaje enviado: {message}");
 
                 byte[] buffer = new byte[1024];
                 int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
+
+                if (bytesRead == 0)
+                    throw new SocketException((int)SocketError.ConnectionReset);
+
                 string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
                 Console.WriteLine($"Respuesta del servidor: {response}");
                 return;
@@ -69,11 +77,9 @@ public class SocketClient
                 Console.WriteLine($"Intento {retryCount} de envío fallido: {ex.Message}");
 
                 if (retryCount >= _maxRetries)
-                    throw new Exception($"No se pudo enviar el mensaje después de {_maxRetries} intentos", ex);
+                    throw;
 
                 await Task.Delay(_retryDelayMs);
-
-                // Intentar reconectar antes del próximo reintento
                 await TryReconnectAsync();
             }
         }
